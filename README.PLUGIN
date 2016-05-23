@@ -1,0 +1,122 @@
+                                Wing Attack Plan R
+                             Plugin Development Guide
+
+----------------------------------------------------------------------
+SPECIFICATIONS
+
+
+----------------------------------------------------------------------
+API METHODS
+
+
+----------------------------------------------------------------------
+APPLICATION EVENTS
+
+Plan-R PluginManager Specifications
+
+       Spec                   Signature
+    :app_startup          handler_method(PlanR::Application) -> nil
+    :app_shutdown         handler_method(PlanR::Application) -> nil
+    :repo_open            handler_method(PlanR::Repo) -> nil
+    :repo_save            handler_method(PlanR::Repo) -> nil
+    :repo_close           handler_method(PlanR::Repo) -> nil
+    :repo_db_connect      handler_method(Object) -> nil
+    :repo_add_doc         handler_method(PlanR::Document) -> nil
+    :repo_remove_doc      handler_method(PlanR::Document) -> nil
+    :repo_update_doc      handler_method(PlanR::Document) -> nil
+    :repo_doc_revision    handler_method(PlanR::Document) -> nil
+    :repo_doc_index       handler_method(PlanR::Document) -> nil
+    :repo_doc_prop_change handler_method(PlanR::Document) -> nil
+    :repo_doc_tag_change  handler_method(PlanR::Document) -> nil
+    :repo_doc_meta_change handler_method(PlanR::Document) -> nil
+  
+
+TG-Plugin Hooks
+
+  To run code on application start or shutdown:
+    class My Plugin
+      extend TG::Plugin
+
+      def application_startup(app)
+        # on-startup code goes here
+      end
+    
+      def application_shutdown(app)
+        # on-shutdown code goes here
+      end
+    end
+
+  To hook Repository-open
+
+      def application_object_load(app, obj)
+        if obj.kind_of? PlanR::Repo
+          # add on-repo-load code here
+        end
+      end
+
+
+----------------------------------------------------------------------
+DEBUGGING
+
+ 1. TG-Plugin Settings
+
+TG-Plugin-based plugin classes capture exceptions in plugin methods in order to
+not crash the application. This can make plugins difficult to debug, as errors
+will silently fail.
+
+To enable writing of caught exceptions to STDERR:
+  $TG_PLUGIN_DEBUG_STREAM=$stderr
+
+To enable general debug messages:
+
+  $TG_PLUGIN_DEBUG=true
+
+To disable type-checking of plugin method return values:
+  $TG_PLUGIN_FORCE_VALID_RETURN=false
+
+
+2. Exception handling
+
+It is a good idea when writing a plugin method to wrap the entire thing in
+a catch-all exception handler. The handler can be safely removed when the
+plugin method is working.
+
+Example:
+
+  def do_something_on_startup(app)
+    begin
+      raise "not implemented!"
+
+    rescue Exception => e
+      $stderr.puts "ERROR IN #{class.name}: #{e.message}"
+      # eight lines of backtrace should be sufficient
+      $stderr.puts e.backtrace[0,8].join("\n")
+    end
+  end
+
+
+# ----------------------------------------------------------------------
+
+NOTES
+
+Subclassing a plugin
+
+A subclass must either extend TG::Plugin again, or invoked TG::Plugin.extended
+in order to register itself.
+
+class Parent
+  extend TG::Plugin
+  name 'Parent'
+end
+
+# redundantly invoke extend:
+class ChildA < Parent
+  extend TG::Plugin
+  name 'Child A'
+end
+
+# call extended() manually
+class ChildB < Parent
+  TG::Plugin.extended(self)
+  name 'Child B'
+end

@@ -1,0 +1,117 @@
+RAKE TARGETS
+
+Running "rake -T" will list all rake targets.
+
+Build packages:
+	rake build:gem
+Generate Documentation:
+	rake doc:rdoc 
+Install on local system:
+	rake install:home
+	rake install:home-uninstall
+	rake install:system
+	rake install:system-uninstall
+Run tests (BROKEN)
+	rake test:all
+	rake test:api-dev
+	rake test:integration
+	rake test:module
+	rake test:plugins
+	rake test:system
+	rake test:unit
+
+REQUIREMENTS
+
+- tg-plugins
+  Included as a submodule
+    # from repo top-level dir:
+    bash$ git submodule add https://github.com/mkfs/tg-plugins \
+          dependencies/tg-plugins
+    # to update:
+    bash$ cd dependencies/tg-plugins && git pull
+
+- grit
+  via gem
+  TODO: replace with https://github.com/libgit2/rugged
+  gem install grit
+
+- picky
+  via gem
+  gem install picky picky-generators
+
+- whatlanguage
+  via gem
+  gem install whatlanguage
+
+- nokogiri
+  via gem
+  gem install nokogiri
+
+
+DIRECTORY STRUCTURE
+
+  bin/					Framework application directory
+  lib/					Framework module directory
+  lib/plan_r				Framework and Data Model
+  lib/plan_r/application		Application services
+  lib/plan_r/conf
+  lib/plan_r/datatype			Data Model datatypes
+  lib/plan_r/document
+  lib/plan_r/plugins			Framework Plugin Objects
+  lib/plan_r/plugins/shared		Classes shared by Plugin objects
+  lib/plan_r/util
+
+
+UTILITIES
+
+  bin/load_local_doc
+  bin/lucene_daemon
+  bin/lucene_jruby_wrapper
+  bin/mirror
+  bin/octave_wrapper
+  bin/plan-r			the Plan-R CLI application
+  bin/r_wrapper
+  prod_env.sh			eval this file to set RUBYLIB (using gems)
+  test_env.sh			eval this file to set RUBYLIB (using submodules)
+
+
+SERVICES
+
+  config
+  database
+  document_mgr
+  plugin_mgr
+  search
+
+
+REPOSITORY NODE TYPES
+
+  dict
+  document
+  note
+  property
+  resource
+  table
+  tag
+
+
+DATATYPES
+
+  analysis_results
+  data_table
+  document
+  document/note
+  document/table
+  ident
+  parsed_document
+  token_stream
+
+
+NOTES:
+- cannot load such file -- tg/plugin
+  * RUBYLIB does not include dependencies:
+      eval `./test_env.sh`
+    Can also gem-install dependencies if necessary
+
+- use Application::*Manager objects as much as possible!
+  These integrate searching and so forth
