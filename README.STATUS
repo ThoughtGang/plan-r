@@ -1,0 +1,25 @@
+Ident
+  * Apache Tika works
+  * file(1) works
+  * ASCII works
+
+
+File Formats
+  * HTML (via Nokogiki) works, but needs improvement
+  * PDF (via poppler) works, but needs replacement
+  * ASCII works
+
+
+Data Sources
+  * HTTP (via net/http) source works
+  * local filesystem source works
+  * script source works
+
+
+Search Engines
+  * Picky search engine works
+  * Lucene search engine works
+
+Commands
+  * All standalone commands (bin/plan-r-*) in the repository work
+  * The main 'plan-r' interpreter program has not been implemented

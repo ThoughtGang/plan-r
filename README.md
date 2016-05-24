@@ -15,7 +15,7 @@ GUI implemented as a local webapp.
  - optional non-mirrored ("linked") indexing of local and remote documents
  - nested documents
  - integration with R and Octave (not implemented)
- - currently supports plaintext, HTML, PDF, RTF documents
+ - currently supports plaintext, HTML, PDF documents
 
 
 ## Applications
