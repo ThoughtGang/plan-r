@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Write properties of document in a Plan R repository to STDOUT
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  def self.disable_plugins?; true; end 
+  def self.disable_jruby?; true; end 
+  def self.disable_vcs?; true; end 
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+    @options.node_type = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO [PATH] [...]"
+      opts.separator "Print the properties of a Document in a Plan-R repo"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-t', '--type str', 'Node type [default: all]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    if @options.paths.empty?
+      display_repo_properties repo
+    else
+      show_filename = @options.paths.count > 1
+      @options.paths.each do |path|
+        display_document_properties(repo, path, show_filename)
+      end
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def display_repo_properties(repo)
+    puts "Name: #{repo.name}"
+    puts "Description: #{repo.description}"
+    puts "Created: #{repo.created}"
+    repo.repo_properties.each { |k,v| puts "#{k.to_s}: #{v}" }
+  end
+
+  def display_document_properties(repo, path, show_filename)
+
+    puts '===== ' + path + ' =====' if show_filename
+    PlanR::Application::DocumentManager.lookup(repo, path).each do |arr|
+      props = repo.properties(arr[1], arr[0])
+      # don't report directories with no properties
+      next if (arr[0] == :folder and props.empty?)
+      puts "[#{arr[0].to_s}] #{arr[1]}"
+      props.each { |k,v| puts "  #{k.to_s}: #{v}" }
+    end
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

@@ -249,7 +249,6 @@ Plan-R provides the following command-line utilities:
   - plan-r-tokenize
   - plan-r-transform
   - plan-r-update
-  - plan-r-vc
 
 
 # License

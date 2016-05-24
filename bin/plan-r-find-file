@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for finding filenames in a Plan R repo
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def self.disable_plugins?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+  def self.disable_db?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.path = nil
+    @options.patterns = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO DIR [GLOB] [...]"
+      opts.separator "Find all filenames matching GLOB in Plan-R repo." 
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DIR is a document path in the repo ('/')."
+      opts.separator " * GLOB is a filename glob to match."
+      opts.separator ""
+
+      opts.separator "Options:"
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+
+    @options.path = args.shift || '/'
+    args.each do |arg|
+      pat = arg.gsub('*','.*').gsub('?','.?')
+      options.patterns << /#{pat}$/
+    end
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    PlanR::Application::DocumentManager.find(repo, @options.path) { |path|
+      (@options.patterns.empty?) || \
+      (! @options.patterns.select { |pat| path =~ pat }.empty?)
+    }.each { |path| display_item path }
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def display_item(path)
+    # TODO: -l option?
+    puts path
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

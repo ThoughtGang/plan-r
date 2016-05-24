@@ -1,0 +1,168 @@
+#!/usr/bin/env jruby
+=begin rdoc
+DRb-based server to provide access to a JRuby process.
+(c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+
+This file defines the API of the DRb service exposed by the JRuby
+process. 
+
+Modules loaded at runtime add operations to this base class. Each operation 
+defines a single point of entry to objects defined under plugins/shared/jruby, 
+and thus takes an arguments Hash object rather than a specific number of 
+arguments.
+
+Note that because arguments to these API methods must cross the DRb barrier,
+they should be Ruby primitive objects, not PlanR or User-defined classes. This
+complicates the interface somewhat.
+
+WARNING: This executable should not be invoked directly in application code.
+Use PlanR::Application::JRuby instead.
+=end
+
+# Bail out early unless invoked under JRuby
+raise ScriptError.new("Lucene requires JRuby") unless RUBY_PLATFORM =~ /java/
+
+require 'drb'
+require 'java'
+
+=begin rdoc
+DRb service that provides access to JRuby instance.
+
+Note that this is a bare service class which has methods added during
+JrubyDaemon.start through the use of modules.
+
+This uses the PLANR_PLUGIN_PATH environment variable to determine which
+paths contain add-on modules (usually plan-r/plugins/shared/jruby). Every
+.rb file in these paths is loaded via require(). Modules are expected to
+add instance methods to the JRubyDaemon class, which will be instantiated once
+all modules are loaded.
+
+See plan-r/plugins/shared/jruby/lucene/index.rb for an example.
+=end
+class JRubyDaemon
+
+  DEFAULT_PLUGIN_PATH = File.join(File.dirname(File.dirname(__FILE__)), 
+                                  'lib', 'plan-r', 'plugins')
+  DEFAULT_PORT = 59595
+  VERSION = "1.0.1-alpha"
+
+  attr_reader :usage_count
+
+  # ----------------------------------------------------------------------
+  # STARTUP
+
+  def initialize
+    @usage_count = 0
+    @running = true
+    @mutex = Mutex.new
+  end
+
+=begin rdoc
+Start JRuby Daemon on specified port
+=end
+  def self.start(port, plugin_path='')
+    self.load_modules((plugin_path.empty?) ? DEFAULT_PLUGIN_PATH : plugin_path)
+
+    DRb.start_service "druby://localhost:#{port}", self.new
+    puts "lucened started (#{Process.pid}). Connect to #{DRb.uri}" if $DEBUG
+   
+    trap('HUP') { DRb.stop_service; JRubyDaemon.start(port) }
+    trap('INT') { puts 'Stopping lucened'; DRb.stop_service }
+
+    DRb.thread.join
+  end
+
+=begin rdoc
+Load JRuby-specific modules. This takes a colon-delimited list of (PlanR plugin)
+directories, appends "/shared/jruby" to each entry, and invokes load_module_dir
+on the resulting path if it exists.
+=end
+  def self.load_modules(plugin_path)
+    plugin_path.split(':').each do |path|
+      mod_path = File.join(path, 'shared', 'jruby')
+      next if ! (File.directory? mod_path)
+      load_module_dir mod_path
+    end
+  end
+
+=begin rdoc
+Load ruby files in directory (presumed to be the subdirectory shared/jruby of
+a Plan-R plugin directory.
+=end
+  def self.load_module_dir(path)
+    Dir.foreach(path) do |entry|
+      next if entry.start_with?('.')
+      fname = File.join(path, entry)
+
+      if File.directory?(fname)
+        load_module_dir(fname)
+      elsif (File.file? fname) && (entry.end_with? '.rb')
+        require fname
+      end
+    end
+  end
+
+  # ----------------------------------------------------------------------
+  # Service API
+
+=begin rdoc
+Called by clients on connect
+=end
+  def inc_usage
+    @mutex.synchronize { @usage_count += 1 }
+  end
+
+=begin rdoc
+Called by clients on disconnect
+=end
+  def dec_usage
+    @mutex.synchronize { @usage_count -= 1 }
+  end
+
+=begin rdoc
+Terminate JRubyD if usage count is 0.
+=end
+  def stop_if_unused
+    @mutex.synchronize { stop if (@usage_count <= 0 && @running) }
+  end
+
+=begin rdoc
+Terminate JRubyD regardless of usage count. 
+=end
+  def stop
+    DRb.stop_service
+  end
+
+=begin rdoc
+Return class name and version number
+=end
+  def version
+    self.class.name + ' ' + VERSION
+  end
+
+end
+
+# ----------------------------------------------------------------------
+if __FILE__ == $0
+  port = ARGV.count > 0 ? ARGV.first.to_i : JRubyDaemon::DEFAULT_PORT
+  rv = 0
+  begin
+    JRubyDaemon.start(port, ENV['PLANR_PLUGIN_PATH'])
+
+  rescue Errno::EADDRINUSE
+    # Something is already running on JRubyD port; can we use it?
+    begin
+      obj = DRbObject.new_with_uri("druby://localhost:#{port}")
+      if ! (obj.version.start_with? JRubyDaemon.name)
+        $stderr.puts "Unknown DRb instance on #{port}"
+        rv = -1
+      end     # else "Yes, everything is fine"
+    rescue Exception => e
+      rv = -2
+      $stderr.puts "Port #{port} already taken"
+    end
+
+  end
+
+  exit rv
+end

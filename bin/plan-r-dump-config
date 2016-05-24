@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for listing Plan R configuration
+
+require 'plan-r/application/cli'
+require 'plan-r/application/config'
+
+class App < PlanR::CliApplication
+
+  def self.disable_db?; true; end
+  def self.disable_plugins?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options = OpenStruct.new
+    @options.patterns = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0}"
+      opts.separator "Print contents of Plan_R config to STDOUT"
+      standard_cli_options(opts)
+      end
+    opts.parse!(args)
+  end
+
+  def start
+    cfg_mgr = PlanR::Application::ConfigManager
+    print_directories(cfg_mgr)
+    print_config(cfg_mgr)
+  end
+
+  def print_directories(cfg_mgr)
+    puts "Default config dir: #{cfg_mgr.get_default_dir}"
+    puts "System dir: #{cfg_mgr.get_system_dir}"
+    puts "Home dir: #{cfg_mgr.get_home_dir}"
+    puts "Working dir: #{Dir.pwd}"
+    puts "Environment config dir: #{cfg_mgr.get_env}"
+  end
+
+  def print_config(cfg_mgr)
+    cfg_mgr.domains.each do |sym|
+      h = cfg_mgr[sym]
+      puts "============================"
+      puts sym.to_s
+      h.each do |k,v|
+        puts("    %20s:    %v" % [k,v])
+    end
+  end
+
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec()
+end

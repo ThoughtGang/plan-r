@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Remove a document from a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+    @options.node_type = nil # nil means 'all' (do not filter by node type)
+    @options.recursive = false
+
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO PATH [...]"
+      opts.separator "Remove a Document from a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-r', '--recursive', 'Include children and subdirectories' ) {
+        @options.recursive = true
+      }
+      opts.on( '-t', '--type str', 'Node type [default: all]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo || (@options.paths.empty?)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.paths.each do |path|
+      begin
+        PlanR::Application::DocumentManager.remove_path(repo, path, 
+                                        arg_to_node_type(@options.node_type),
+                                        @options.recursive)
+      rescue PlanR::ContentRepo::Node::NodeDeleteError => e
+        puts "Could not remove '#{path}' : #{e.message}"
+      end
+    end
+
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

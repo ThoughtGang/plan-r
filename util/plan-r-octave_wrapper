@@ -1,0 +1,71 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# runs an instance of Octave via popen
+
+require 'open3'
+require 'io/wait'
+
+module Kernel
+  class Octave
+
+    attr_reader :octave_cmd
+    def initialize(path_to_octave=nil)
+      @octave_cmd = path_to_octave ? path_to_octave : `which octave`.chomp + \
+                    ' --no-line-editing --norc -H -q -V'
+    end
+
+    def start
+      @stdin, @stdout, @stderr, @wait_thr = Open3.popen3(@octave_cmd)
+      @pid = @wait_thr[:pid]
+      # disable page
+      enter_command('page_screen_output=0')
+    end
+
+    def term
+      enter_command('quit')
+      @stdin.close; @stdout.close; @stderr.close; @wait_thr.value
+    end
+
+    def cmd_done_marker
+      "$PID$#{@pid}$"
+    end
+
+    def enter_command(cmd)
+      output = []
+      error = []
+      @stdin.puts(cmd)
+      @stdin.flush
+      @stdin.puts("disp(\"#{cmd_done_marker}\")")
+      #@stdin.puts(cmd + "; disp(\"#{cmd_done_marker}\")")
+
+      # Wait for response
+      while @stdout.wait(10) == false
+        sleep 0.10
+      end
+
+      while @stdout.ready? || @stderr.ready?
+        sleep 0.05
+        error += @stderr.read(@stderr.nread).split("\n") if @stderr.ready?
+        if @stdout.ready?
+          @stdout.read(@stdout.nread).split("\n").each do |line|
+            output << line if line && (! line.empty?) &&
+                              (! line.end_with? cmd_done_marker)
+          end
+        end
+      end
+
+      {:stdin => cmd, :stdout => output.join("\n"), :stderr => error.join("\n")}
+    end
+
+  end
+end
+
+if __FILE__ == $0
+  oct_proc = Kernel::Octave.new
+  oct_proc.start
+  oct_proc.enter_command('x.a = 49; x.b = [1, 2; 3, 4]; x.c = "string";')
+  oct_proc.enter_command('x.a')
+  oct_proc.enter_command('disp(x.a)')
+  oct_proc.enter_command('disp(sqrt(x.a))')
+  oct_proc.term
+end

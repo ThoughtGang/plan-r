@@ -1,0 +1,135 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run transform plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+
+    @options.plugin = nil
+    @options.replace = false
+    @options.input = nil
+    @options.output = nil
+    @options.out_file = nil
+    @options.node_type = :document
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} -p NAME REPO PATH [OUT_PATH]"
+      opts.separator "Run a transform_doc plugin on a Plan-R document."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator " * OUT_PATH is a path in the Repo repo."
+      opts.separator "This will generate a new document at OUT_PATH"
+      opts.separator "with the results of the transform."
+      opts.separator "If OUT_PATH is not provided, the results"
+      opts.separator "will be written to STDOUT"
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-f', '--replace', 'Force replacement of original doc',
+              'Otherwise a filename will be generated') {
+        @options.replace = true
+      }
+
+      opts.on('o', '--output str', 'Write to output file, not repo') { |str|
+        @options.out_file = str
+      }
+
+      opts.on('-p', '--plugin str', 'Plugin to use for transform',
+              'Try "-p help" to list available plugins.') { |str|
+        @options.plugin = str 
+      }
+
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.input = args.shift
+    @options.output = args.shift
+
+    if (! @options.repo) or (! @options.input)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+
+    if (! @options.plugin)
+      $stderr.puts "-p argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.plugin and @options.plugin == 'help'
+      puts "Plugins providing :transform_doc :"
+      PlanR::Application::PluginManager.providing(:transform_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    ctype = arg_to_node_type(@options.node_type)
+    doc = PlanR::Application::DocumentManager.doc_factory(repo, @options.input,
+                                                          ctype)
+    if doc
+      out_doc = perform_transform(doc)
+      write_transformed_document(repo, doc, out_doc) if out_doc
+    else
+      $stderr.puts "'#{path}' not in repo"
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def perform_transform(doc)
+    plugin = PlanR::Application::PluginManager.find(@options.plugin)
+    if ! plugin
+      $stderr.puts "No plugin '#{@options.plugin}' for :transform_doc"
+      return
+    end
+    plugin.spec_invoke(:transform_doc, doc)
+  end
+
+  def write_transformed_document(doc, out_doc)
+    puts out_doc.inspect
+    if ( @options.output)
+      if @options.output == @options.input and (! @options.replace)
+        @options.output = repo.safe_filename(doc.path, doc.node_type)
+      end
+      PlanR::Application::DocumentManager.import_doc(repo, @options.output,
+                                                     out_doc)
+    else
+      io = @options.out_file ? $stdout : io = File.open(@options.out_file, 'w') 
+      # FIXME: better output
+      #io.puts out_doc.class.name
+      #io.puts out_doc.inspect
+      io.puts out_doc.contents.inspect
+      io.close if @options.out_file
+    end
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

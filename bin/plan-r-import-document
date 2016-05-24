@@ -1,0 +1,169 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for importing documents or URLs into a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/document_mgr'
+
+# convenience decls to save space
+DocManager = PlanR::Application::DocumentManager
+OPTS_STR = "[-dpPst str][-aoT] REPO PATH [...]"
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.dest = ''
+    @options.sync_policy = nil
+    @options.sync_method = DocManager::SYNC_REPLACE
+    @options.sync_plugin = nil
+    @options.mirror_plugin = nil
+    @options.orphanize = false
+    @options.cache = true
+    @options.index = true
+    @options.paths = []
+    @options.props = {}
+    @options.tags = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} #{OPTS_STR}"
+      opts.separator "Import documents or URLs into a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a file, directory, or URL."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-d', '--dest str', 'Destination (in-repo) path.',
+              'If this ends in "/", it will be treated as',
+              'a directory instead of a filename.') { |str|
+        @options.dest = str
+      }
+      opts.separator 'Sync/Regeneration optons'
+      opts.on('-a', '--append', 'Append document contents on regenerate',
+              'Default is to replace document contents') {
+        @options.sync_method = DocManager::SYNC_APPEND
+      }
+      opts.on('-M', '--mirror str', 'Use specific Mirror plugin',
+              'Default is to use document location',
+              'and content to determine plugin') { |str|
+        @options.sync_plugin = str
+      }
+      opts.on('-O', '--orphan', 'Do not retain link to original location',
+              'NOTE: This sets sync_policy to SYNC_MANUAL') {
+        @options.orphanize = true
+        @options.sync_method = DocManager::SYNC_REPLACE
+        @options.sync_policy = DocManager::SYNC_MANUAL
+      }
+      opts.on('-P', '--plugin str', 'Use specific DataSource plugin',
+              'Default is to use document location to ',
+              'determine plugin (local vs remote)') { |str|
+        @options.sync_plugin = str
+      }
+      opts.on('-s', '--sync=str', 'Sync policy. One of:',
+              DocManager::SYNC_OPTIONS.join(' ')) { |str|
+        sym = str.to_sym
+        raise "Invalid -s option #{str}" if \
+              (! DocManager::SYNC_OPTIONS.include? sym)
+        @options.sync_policy = sym
+      }
+      opts.on('--no-cache', 'Do not cache document contents locally',
+              'This means there will be no on-disk copy of',
+              'the document in the Repo. The document will',
+              'still be indexed (see --no-index).',
+              'NOTE: This sets sync_policy to SYNC_ACCESS') {
+        @options.cache = false
+        @options.sync_method = DocManager::SYNC_REPLACE
+        @options.sync_policy = DocManager::SYNC_ACCESS
+      }
+      opts.on('--no-index', 'Do not index document contents',
+              'This will prevent document from showing up',
+              'in queries.',
+              'NOTE: This action is reversible.' ) {
+        @options.index = false
+      }
+
+      opts.separator 'Metadata options:'
+      opts.on('-p', '--prop name=val', 'Set property "name" to "value"',
+              'Value must be a String value.',
+              'Any number of -p arguments may be supplied' ) { |str|
+        k,v = str.split('=', 2)
+        @options.props[k] = v
+      }        
+      opts.on('-t', '--tag name', 'Tag document with "name"',
+              'Any number of -t arguments may be supplied' ) { |str|
+        @options.tags << str
+      }
+      opts.on('-T', '--autotitle', 'Generate title from first line of doc') {
+        @options.props[:autotitle] = true
+      }
+
+      opts.separator('Misc Options:')
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    # error on incompatible options
+    if (@options.orphanize and @options.sync_policy != DocManager::SYNC_MANUAL)
+      puts "Orphaned documents (-O) must have SYNC_MANUAL policy"
+      exit -1
+    end
+    if (! @options.cache) and (@options.sync_policy != DocManager::SYNC_ACCESS)
+      puts "Non-cached documents (--no-cache) must have SYNC_ACCESS policy"
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo || (@options.paths.empty?)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.sync_policy ||= DocManager::SYNC_AUTO
+    imp_opts = DocManager::SyncOptions.new( @options.sync_policy,
+                                            @options.sync_method,
+                                            @options.sync_plugin,
+                                            @options.mirror_plugin,
+                                            @options.orphanize,
+                                            @options.cache,
+                                            @options.index )
+    @options.paths.each do |path|
+      doc = DocManager.import(repo, path, @options.dest, imp_opts)
+      if doc
+
+        if (! @options.props.empty? )
+          props = doc.properties
+          @options.props.each do |k,v|
+            # FIXME: how to ensure 'v' is right datatype? json encoding sucks
+            key = k.downcase.gsub(/[^[:alnum:]]/, '_').to_sym
+            props[k] = v
+          end
+          doc.properties = props
+        end
+
+        if (! @options.tags.empty?)
+          tags = doc.tags
+          tags.concat @options.tags
+          doc.tags = tags.sort.uniq
+        end
+      end
+
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

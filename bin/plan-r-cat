@@ -1,0 +1,77 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Write contents of document in a Plan R repository to STDOUT
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  # TODO: are plugins going to be needed for formatting?
+  def self.disable_plugins?; true; end 
+  def self.disable_jruby?; true; end 
+  def self.disable_vcs?; true; end 
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+    @options.node_type = nil
+
+    opts = OptionParser.new do |opts|
+      # FIXME: support -o FILE
+      opts.banner = "Usage: #{File.basename $0} REPO PATH [...]"
+      opts.separator "Write contents of an item in a Plan-R repo to STDOUT"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-t', '--type str', 'Node type [default: first found]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo || (@options.paths.empty?)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.paths.each do |path|
+      doc = PlanR::Application::DocumentManager.doc_factory(repo, path,
+                                           arg_to_node_type(@options.node_type))
+      if doc
+        # FIXME: output to file (no need for -s)
+        puts doc.contents.to_s
+      else
+        $stderr.puts "'#{path}' not in repo"
+      end
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

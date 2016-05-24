@@ -1,0 +1,92 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for importing an archive into a Plan-R Repo
+
+require 'plan-r/application/cli'
+require 'plan-r/application/document_mgr'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/application/repo_mgr'
+
+class App < PlanR::CliApplication
+
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+  def self.disable_database?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.path = nil
+
+    @options.plugin_name = nil
+    @options.filename = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-t str] REPO ARCHIVE [PATH]"
+      opts.separator "Import files from an exported archive into a Plan-R Repo"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a content path in the repo."
+      opts.separator ""
+      opts.separator "Options:"
+
+      opts.on('-p', '--plugin str', 'Specify plugin to import contents with',
+              'By default the fittest import plugin will be used.',
+              'Try "-p help" to list available plugins.' ) { |str|
+        @options.plugin_name = str
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+    @options.filename = args.shift
+    @options.path = args.shift
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+
+    if ! @options.filename
+      $stderr.puts "ARCHIVE argument required!"
+      puts opts
+      exit -1
+    end
+
+  end
+
+  def start
+    if @options.plugin_name == 'help'
+      puts "Plugins providing :import_contents :"
+      pmgr = PlanR::Application::PluginManager
+      pmgr.providing(:import_contents).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+    if (! File.exist? @options.filename)
+      $stderr.puts "No such file #{@options.filename}" 
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+    
+    @options.path ='/' if (! @options.path)
+
+    # FIXME: support plugin options
+    PlanR::Application::DocumentManager.import_archive( repo, 
+                                                       @options.filename,
+                                                       @options.path, 
+                                                       @options.plugin_name )
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

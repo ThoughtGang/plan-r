@@ -1,0 +1,60 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for adding a Document to a repository
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+require 'plan-r/document'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.dest = nil
+    @options.contents = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO DEST [TEXT]"
+      opts.separator "Add a Document to a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DEST is a repo path"
+      opts.separator " * TEXT is the document content."
+      opts.separator "If TEXT is not provided, STDIN will be read."
+      opts.separator ""
+      opts.separator "Options:"
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+    @options.dest = args.shift
+    @options.contents = args.shift
+
+    if ! @options.repo || ! @options.dest
+      $stderr.puts "#{@options.repo ? 'DEST' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.contents = ARGF.read if ! @options.contents
+
+    doc_mgr = PlanR::Application::DocumentManager 
+    props = doc_mgr.default_properties(:document)                      
+    props[:create_app] = 'plan-r-add-doc'
+    doc_mgr.new_file(repo, :document, @options.dest, @options.contents, props)
+
+    PlanR::Application::RepoManager.close(repo, true)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

@@ -1,0 +1,18 @@
+#--- |
+#  ---
+#  plugins:
+#    strict_return: true
+#    debug: true
+#    base_dirs: [ '/usr/local/lib/plan-r/plugins' ]
+#    prevent_loading: [ '/usr/local/lib/plan-t/plugins/broken_plugin.rb' ]
+#    plugin_dirs: [ './plugins' ]
+#    enable:
+#    - Example Plugin-2.0
+#    disable:
+#    - Example Plugin-1.0
+#    bias:
+#      Example Plugin:
+#        example_spec: 50
+#        another_spec: -20
+#      Another Plugin:
+#        example_spec: -10

@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Find related documents according to a PlanR Index
+
+# TODO: -v option for verbose (stats)
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/application/query_mgr'
+require 'plan-r/datatype/query'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.path = nil
+
+    @options.plugin = nil
+    @options.detail = false
+    @options.show_score = true
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO PATH"
+      opts.separator "Run a related_docs plugin on a Document in a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-p', '--plugin str', 'Specify plugin to use for query',
+              'Default: all plugins',
+              'Try "-p help" to list available plugins') { |str|
+        @options.plugin = str 
+      }
+      opts.on('--detail', 'Display detailed document listing') {
+        @options.detail = true
+      }
+      opts.on('-s', '--score', 'Display document score') {
+        @options.show_score = true
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+    @options.path = args.shift
+
+    if ! @options.repo || ! @options.path
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.plugin and @options.plugin == 'help'
+      puts "Plugins providing :related_docs :"
+      PlanR::Application::PluginManager.providing(:related_docs).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    doc = PlanR::Application::DocumentManager.doc_factory(repo, @options.path)
+    if (! doc)
+      $stderr.puts "'#{@options.path}' not in repo"
+      return
+    end
+
+    list_related_docs(doc) 
+    
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def list_related_docs(doc)
+    plugin = @options.plugin_name ? 
+            PlanR::Application::PluginManager.find(@options.plugin_name) :
+            PlanR::Application::PluginManager.fittest_providing(:related_docs, doc)
+    # TODO: provide option to query each plugin instead of just the fittest
+    if ! plugin
+      $stderr.puts "Could not find plugin '#{@options.plugin_name}' for :related_docs"
+      return
+    end
+
+    rating = plugin.spec_rating(:related_docs, doc)
+    results = plugin.spec_invoke(:related_docs, doc)
+    results.each do |path, result|
+      puts "%s : %s" % [path, result.terms.keys.join(', ')]
+    end
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

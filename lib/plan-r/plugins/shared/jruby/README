@@ -1,0 +1,10 @@
+JRUBY plugin modules.
+
+Every module under this directly is automatically loaded into the JRuby
+process. The modules define instance methods of the JRubyDaemon class,
+which can then be invoked over DRb.
+
+These modules should have no inter-dependencies (i.e. they do should not
+require() each other). Shared code should be in plugins/shared. All of these
+modules will be loaded automatically, so their presence at runtime can be
+assumed (i.e. if one is loaded, they all are).

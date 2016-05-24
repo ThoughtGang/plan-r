@@ -1,0 +1,80 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for listing Plan R plugins
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+
+class App < PlanR::CliApplication
+
+  def self.disable_db?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options = OpenStruct.new
+    @options.patterns = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [GLOB] [...]"
+      opts.separator "Show details for plugins matching pattern, or all plugins"
+      standard_cli_options(opts)
+      end
+    opts.parse!(args)
+    
+    args.each do |arg|
+      pat = arg.gsub('*','.*').gsub('?','.?')
+      @options.patterns << /^.*#{pat}.*$/ 
+    end
+  end
+
+  def start
+    limit = (! @options.patterns.empty?)
+    PlanR::Application::PluginManager.plugins.values.sort { |a,b|
+      a.name <=> b.name }.each do |p|
+      next if limit && (@options.patterns.select{|pat| p.name =~ pat}.empty?)
+      display_plugin(p)
+    end
+  end
+
+  def display_plugin(p)
+    puts "Name: #{p.name}"
+    puts "Version: #{p.version}"
+    puts "Canon-Name: #{p.canon_name}"
+    puts "Author: #{p.author}"
+    puts "License: #{p.license}"
+    puts "Description: #{p.description}"
+
+    puts "\nMethod Specifications:"
+    p.specs.each{ |name, s| print_spec(name, s) }
+
+    puts "\nApi Methods:"
+    p.api(true).each { |name, m| print_api(name, m) }
+
+    puts "\nDependencies:"
+    p.class.dependencies.each { |dep| puts "\t#{depends_string(dep)}" }
+    puts "\nDocumentation:"
+    puts p.help
+    puts
+  end
+
+  def depends_string(dep)
+    "#{dep[:name]} #{dep[:op]} #{dep[:version]}"
+  end
+
+  def print_spec(name, mspec)
+    spec = PlanR::Application::PluginManager.specification(name)
+    puts "\t%s: %s [%s]" % [name, spec.prototype, mspec.symbol]
+  end
+
+  def print_api(name, meth)
+    descr = meth.description
+    puts "\t# " + descr if descr && (! descr.empty?)
+    puts "\t%s(%s) -> %s" % [name, meth.arguments.join(', '), 
+                             meth.return_value]
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec()
+end

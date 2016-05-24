@@ -1,0 +1,98 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for listing the contents of a Plan R repo
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+# TODO: glob/patterns?
+#       metadata/node-type option
+#       better details
+class App < PlanR::CliApplication
+
+  # nope, duneed nunnuvese, guv
+  def self.disable_plugins?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.recurse = false
+    @options.metadata = false
+    @options.detail = false
+    #@options.node_type = nil
+    @options.paths = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-mrl] [-d str] REPO [PATH] [...]"
+      opts.separator "List contents of a Plan-R repo by path."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a document path in the repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-l', '--full', 'Long listing') { @options.detail = true }
+      opts.on('-m', '--metadata', 'Use metadata tree') {@options.metadata=true}
+      opts.on('-r', '--recurse', 'Recursive listing') {@options.recurse = true}
+      # TODO: Support limit by node type
+      #opts.on('-t', '--type str', 'Limit to node type (try -t help)') { |str|
+      #  @options.node_type = str.to_sym
+      #}
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+
+    args.each do |arg|
+      # TODO: support regex
+      #pat = arg.gsub('*','.*').gsub('?','.?')
+      #@options.paths << /^#{pat}$/
+      @options.paths << arg
+    end
+
+    @options.paths << '/' if (@options.paths.empty?)
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    doc_mgr = PlanR::Application::DocumentManager
+    @options.paths.each do |path|
+      if @options.metadata
+
+        available_node_types.each do |ctype|
+          repo.metadata(path, ctype, nil).each do |mtype, node|
+            next if mtype == :folder
+            puts( "%10s    %s" % [mtype.to_s, node.path] )
+          end
+        end
+
+      elsif @options.detail
+
+        doc_mgr.lookup(repo, path, @options.recurse).each do |ctype, p|
+          # DEBUG:
+          #puts doc_mgr.doc_factory(repo, p).inspect
+          puts( "%10s    %s" % [ctype.to_s, p] ) 
+        end
+
+      else
+        doc_mgr.ls(repo, path, @options.recurse) { |p| puts p }
+      end
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

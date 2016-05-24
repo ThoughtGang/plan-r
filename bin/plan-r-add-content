@@ -1,0 +1,117 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for adding content without an origin
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+require 'plan-r/document'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.node_type = :document
+    @options.dest = ''
+
+    # FIXME: are these applicable?
+    #@options.editor = nil
+    #@options.language = nil
+    @options.mime = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-nst] REPO DEST [PATH]"
+      # FIXME: change to add-document?
+      opts.separator "Add content without an origin to a Plan-R repo"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DEST is a repo path"
+      opts.separator " * PATH is a file."
+      opts.separator "If PATH is not provided, STDIN will be read."
+      opts.separator "NOTE: This is a low-level command. The added content"
+      opts.separator "      will not be indexed or synchronized. Use "
+      opts.separator "      add-document, add-dict, add-note, add-table for"
+      opts.separator "      normal operation."
+      opts.separator ""
+      opts.separator "Options:"
+
+      opts.on('-D', '--document', 'Add content as a Document [default]') { 
+        @options.node_type = :document
+      }
+      opts.on('-d', '--dict', 'Add content as a Dict') { 
+        @options.node_type = :dict
+      }
+      opts.on('-n', '--note', 'Add content as a Note document') { 
+        @options.node_type = :note
+      }
+      #opts.on('-s', '--script', 'Add content as a Script') { 
+      #  @options.node_type = :script
+      #}
+      opts.on('-t', '--table', 'Add content as a Table document') { 
+        @options.node_type = :table
+      }
+
+      #opts.on('-E', '--editor str', 'Specify editor for document') { |str|
+      #  @options.editor = str 
+      #}
+      #opts.on('-L', '--language str', 'Specify document language') { |str|
+      #  @options.language = str 
+      #}
+      opts.on('-M', '--mime-type str', 'Specify document MIME-type') { |str|
+        @options.mime = str 
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+    @options.dest = args.shift
+
+    if ! @options.repo || ! @options.dest
+      $stderr.puts "#{@options.repo ? 'DEST' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    contents = generate_content(ARGF.read, @options.node_type)
+
+    doc_mgr = PlanR::Application::DocumentManager 
+
+    props = doc_mgr.default_properties(@options.node_type)
+    props[:create_app] = 'plan-r-add-content'
+    # TODO:
+    #props[:autotitle] = true
+    #@options.editor
+    #@options.language
+    #@options.mime
+    #:title
+    #:origin
+    #:mime_type
+    #:encoding
+    #:charset
+
+    doc_mgr.new_file(repo, @options.node_type, @options.dest, contents, props)
+
+    PlanR::Application::RepoManager.close(repo, true)
+  end
+
+  def generate_content(data, ctype)
+    case ctype
+    when :dict
+      PlanR::Dict.from_json(data.chomp)
+    when :table
+      PlanR::DataTable.from_json(data.chomp)
+    else
+      data
+    end
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

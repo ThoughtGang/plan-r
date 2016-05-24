@@ -1,0 +1,127 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run analyze plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+
+    @options.all = false
+    @options.plugin = nil
+    @options.parser = nil
+    @options.node_type = :document
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-p NAME] REPO PATH"
+      opts.separator "Run an analyze_doc plugin on a Plan-R document."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator "NOTE: This performs an analysis of a document."
+      opts.separator "DocumentManager.parse_doc() will be invoked"
+      opts.separator "to parse the document before analysis. The"
+      opts.separator "user can specify which parser to use."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-a', '--all', 'Return results for all plugins') { 
+        @options.all_plugins = true 
+      }
+      # TODO: -o file
+      #       --update update properties with analysis results
+      opts.on('-p', '--plugin str', 'Plugin to use for analysis',
+              'By default, the fittest plugin is used.',
+              'Try "-p help" to list available plugins.') { |str|
+        @options.plugin = str 
+      }
+      opts.on('-P', '--parser str', 'Plugin to use for parsing',
+              'By default DocumentManager will use the fittest.',
+              'Try "--parser help" to list available plugins.') { |str|
+        @options.parser = str
+      }
+
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.input = args.shift
+
+    if (! @options.repo) or (! @options.input)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+
+  end
+
+  def start
+    plugin_help = nil
+    if @options.plugin and @options.plugin == 'help'
+      plugin_help = 1
+      puts "Plugins providing :analyze_doc :"
+      PlanR::Application::PluginManager.providing(:analyze_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+    end
+    if @options.parser and @options.parser == 'help'
+      plugin_help = 1
+      puts "Plugins providing :parse_doc :"
+      PlanR::Application::PluginManager.providing(:parse_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+    end
+    return if plugin_help
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    ctype = arg_to_node_type(@options.node_type)
+    doc = PlanR::Application::DocumentManager.doc_factory(repo, @options.input,
+                                                          ctype)
+    if doc
+      pdoc = PlanR::Application::DocumentManager.parse_doc(doc, @options.parser)
+      if pdoc
+        ar_hash = PlanR::Application::DocumentManager.analyze_doc(doc, pdoc,
+                                                                false,
+                                                                @options.plugin)
+        (ar_hash || {}).each do |plugin, ar|
+          puts plugin
+          ar.each { |k,v| puts "\t#{k}: #{v.inspect}" }
+        end
+
+      else
+        $stderr.puts "Invalid ParsedDocument returned by DocumentManager"
+      end
+    else
+      $stderr.puts "'#{path}' not in repo"
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def update_doc(doc, adoc)
+    props = doc.properties.to_h
+    adoc.each { |k, v| props[k.to_sym] = v }
+    doc.properties = props
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for adding a StoredQuery to a repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/query_mgr'
+require 'plan-r/repo'
+
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.dest = nil
+    @options.query = ''
+    @options.engines = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-nst] REPO DEST QUERY"
+      # TODO: add TERMS FIELDS MAX_RESULTS CONTEXT?
+      opts.separator "Add a StoredQuery to a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DEST is a repo path"
+      opts.separator " * QUERY is the search query."
+      opts.separator "If QUERY is not provided, STDIN will be read."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-f', '--force', 'Overwrite existing query/document') {
+        @options.replace = true
+      }
+      opts.on('-i', '--index str', 'Specify search :query_index plugin',
+              'Multiple plugins may be specified.',
+              'Try -i help' ) { |str|
+        @options.engines << str
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.doc_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.dest = args.shift
+    @options.query = args.shift
+
+    if ! @options.repo || ! @options.dest
+      $stderr.puts "#{@options.repo ? 'DEST' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.engines.include? 'help'
+      PlanR::Application::PluginManager.providing(:query_index).each do |p, r|
+        puts p.name
+      end
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.query ||= ARGF.read
+
+    doc_mgr = PlanR::Application::DocumentManager
+
+    # TODO: generate query terms from arguments
+    query = PlanR::Query.new( @options.query )
+    query.raw_query = @options.query
+
+    props = doc_mgr.default_properties(:query)
+    qdoc = PlanR::Application::QueryManager.store(repo, @options.dest, query,
+                                                  @options.engines, props)
+
+    PlanR::Application::RepoManager.close(repo, true)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

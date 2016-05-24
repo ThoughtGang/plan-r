@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for opening one or more Plan R Repo Documents with external programs
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+require 'shellwords'
+
+class App < PlanR::CliApplication
+
+  def self.disable_plugins?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+  def self.disable_database?; true; end
+
+  def open_command
+    case RUBY_PLATFORM
+    when /darwin/         # OS X
+      'open'
+    when /linux/, /bsd/   # X.org
+      'xdg-open'
+    else                  # windows
+      'start'
+    end
+  end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.node_type = :document
+    @options.command = nil
+    @options.paths = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-t str] REPO [PATH] [...]"
+      opts.separator "Open a Document in a Plan-R Repo with an"
+      opts.separator "external program (e.g. a browser)"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a content path in the repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-c', '--cmd str', 'Command used to open file',
+               'Example: plan-r-open -c `which firefox` REPO PATH',
+               "Default is to use  '#{open_command}'" ) do |str|
+        @options.command = str
+      end
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    @options.paths = args
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+
+    if (@options.paths.empty?)
+      $stderr.puts "Nothing to do! Specify a path to open."
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+    
+    cmd = @options.command || open_command
+
+    @options.paths.each do |path|
+      doc = repo.abs_path(path, @options.node_type)
+      next if (! doc) or (! File.exist? doc)
+      pid = Process.fork do
+        doc_s = Shellwords.shellescape(doc) 
+        cmd_s = Shellwords.shellescape(cmd) 
+        %x{#{cmd_s} #{doc_s}}
+      end
+      Process.detach(pid)
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

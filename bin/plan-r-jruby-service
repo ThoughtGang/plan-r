@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility to start or stop JRuby service
+# Note: this is provided as a convenience to have jruby running in the
+# background, e.g. while using CLI utils. It is not intended for normal
+# usage of the PlanR application.
+
+require 'plan-r/application/cli'
+require 'plan-r/application/jruby'
+require 'plan-r/plugins/search/lucene'
+
+class App < PlanR::CliApplication
+  def self.disable_plugins?; true; end
+  def self.disable_db?; true; end
+  def self.disable_vcs?; true; end
+
+  def initialize(args)
+    @options = OpenStruct.new
+    @options.command = args.shift
+  end
+
+  def exec
+    start
+  end
+
+  def start
+    cmd = @options.command.downcase
+    if cmd == 'start'
+      # FIXME: exec_daemon no longer necessary?
+      puts "Executing Lucene Daemon..."
+      PlanR::Application::JRuby.exec_daemon
+      puts "Incrementing usage count..."
+      PlanR::Application::JRuby.connect
+      puts "Done."
+      
+    elsif cmd == 'stop'
+      puts "Decrementing usage count..."
+      PlanR::Application::JRuby.disconnect
+      # FIXME: shutdown no longer necessary?
+      puts "Terminating Lucene Daemon..."
+      PlanR::Application::JRuby.shutdown
+      puts "Done."
+    else
+      $stderr.puts "Unrecognized command '#{cmd}'"
+    end
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec()
+end
+

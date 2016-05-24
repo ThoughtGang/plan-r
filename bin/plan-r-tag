@@ -1,0 +1,98 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Add or remove tags from a document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  def self.disable_jruby?; true; end 
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+    @options.tags = []
+    @options.untags = []
+    @options.node_type = :document
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-nr str] REPO [PATH] [...]"
+      opts.separator "Add/remove tags for a Document in a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator "This will print the tags of the document(s) on exit."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-r', '--remove str', 'Remove specified tags' ) { |str|
+        @options.untags << str
+      }
+      opts.on( '-n', '--name str', 'Add tag "str" to document(s)',
+               'Any number of -t arguments may be supplied' ) { |str|
+        @options.tags << str
+      }
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    if @options.paths.empty?
+      PlanR::Application::DocumentManager.known_tags(repo).sort.each do |t|
+        puts "\t" + t
+      end
+    end
+
+    @options.paths.each do |path|
+      doc = PlanR::Application::DocumentManager.doc_factory(repo, path,
+                                          arg_to_node_type(@options.node_type))
+      if ! doc
+        $stderr.puts "'#{path}' not in repo"
+        next
+      end
+
+      if (! @options.tags.empty?) or (! @options.untags.empty?)
+        tags = doc.tags
+        @options.tags.each { |t| tags << t if (! tags.include? t) }
+        tags.reject! { |t| @options.untags.include? t }
+        doc.tags= tags
+      end
+
+      puts path + ':'
+      puts doc.tags.map { |t| "\t" + t }.join("\n")
+
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

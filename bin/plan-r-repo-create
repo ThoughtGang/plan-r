@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for creating a Plan R repo
+
+require 'plan-r/application/cli'
+require 'plan-r/application/repo_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  # these are not needed for creating a Repo
+  def self.disable_plugins?; true; end 
+  def self.disable_jruby?; true; end 
+
+  def handle_options(args)
+    @options.name ='Untitled'
+    @options.descr = 'Untitled Plan-R repo'
+    @options.git = false
+    @options.path = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-dn str] PATH"
+      opts.separator "Create a new Plan-R repo."
+      opts.separator "Options:"
+      opts.on('-d', '--description str', 'Repo description') { |str|
+        @options.descr = str
+      }
+      opts.on('-g', '--git', 'Enable Git version control in the repo') {
+        @options.git = true
+      }
+      opts.on('-n', '--name str', 'Repo name') {|str| @options.name = str}
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    @options.path = args.shift
+
+    if ! @options.path
+      $stderr.puts 'PATH argument required!'
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    props = { 
+      :description => @options.descr
+      # TODO: provide options to set additional properties
+      # author license etc
+    }
+    p =  PlanR::Application::RepoManager.create(@options.name, @options.path,
+                                                props, @options.git)
+    raise "Unable to create repo at '#{@options.path}'" if ! p
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end
+

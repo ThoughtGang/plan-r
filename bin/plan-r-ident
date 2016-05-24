@@ -1,0 +1,131 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run ident plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+
+    @options.all = true
+    @options.update = false
+    @options.plugin_name = nil
+    @options.plugin = nil
+    @options.node_type = :document
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-p NAME] REPO [PATH] [...]"
+      opts.separator "Run an ident plugin on a Document in a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-a', '--all', 'Invoke all ident plugins') {
+        @options.all = true
+      }
+      opts.on('-p', '--plugin str', 'Specify plugin to use for ident',
+              'By default, the fittest plugin is used') { |str| 
+        @options.plugin_name = str 
+      }
+      opts.on( '-t', '--type str', 'Node type [default: first found]',
+               'Try "-t help"', 
+               'Note: ident should not be needed on non-document nodes') { |str|
+        @options.node_type = str.to_sym
+      }
+
+      opts.on('-u', '--update', 'Update doc in repo with new ident info') { 
+        @options.update = true 
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo || (@options.paths.empty?)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.paths.each do |path|
+      ctype = arg_to_node_type(@options.node_type)
+      doc = PlanR::Application::DocumentManager.doc_factory(repo, path, ctype)
+      if ! doc
+        $stderr.puts "'#{path}' not in repo"
+        next
+      end
+
+      abs_path = doc.abs_path
+      File.open(abs_path, 'rb') do |f|
+        @options.all ?  perform_all_idents(doc, f, abs_path) :
+                        perform_ident(doc, f, abs_path)
+      end
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def perform_ident(doc, f, path)
+    plugin = @options.plugin_name ? 
+            PlanR::Application::PluginManager.find(@options.plugin_name) :
+            PlanR::Application::PluginManager.fittest_providing(:ident, f, path)
+    if ! plugin
+      $stderr.puts "Could not find plugin '#{@options.plugin_name}' for :ident"
+      return
+    end
+
+    rating = plugin.spec_rating(:ident, f, path)
+    ident = plugin.spec_invoke(:ident, f, path)
+    doc.ident = ident if @options.update
+    display_doc_header(doc)
+    display_ident(plugin, rating, ident)
+  end
+
+  def perform_all_idents(doc, f, path)
+    display_doc_header(doc)
+    PlanR::Application::PluginManager.providing(:ident, f, path
+                                               ).each do |plugin, rating|
+      display_ident(plugin, rating, plugin.spec_invoke(:ident, f, path))
+    end
+  end
+
+  def display_doc_header(doc)
+    puts '===== ' + doc.path + ' =====' if options.paths.count > 1
+  end
+
+  def display_ident(plugin, rating, ident)
+    puts "[%d] %s (%s)" % [rating, plugin.name, plugin.version]
+    puts "\tMime-type: #{ident.mime || PlanR::Ident::MIME_UNKNOWN}"
+    puts "\tEncoding: #{ident.encoding || PlanR::Ident::ENC_UNKNOWN}"
+    puts "\tLanguage: #{ident.language || PlanR::Ident::LANG_UNKNOWN}"
+    puts "\tSummary: #{ident.summary || 'not available'}"
+    puts "\tDescription: #{ident.full || 'not available'}"
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

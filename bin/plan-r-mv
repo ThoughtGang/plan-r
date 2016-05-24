@@ -1,0 +1,95 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Move a document within a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+    @options.dest = nil
+    @options.node_type = nil # nil means 'all' (do not filter by node type)
+    @options.recursive = false
+    @options.replace = false
+
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO SRC [SRC...] DEST"
+      opts.separator "Move a Document in a Plan-R repo to a new location"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * SRC is a path in the Repo repo."
+      opts.separator " * DEST is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-f', '--force', 'Overwrite existing files if necessary' ) {
+        @options.replace = true
+      }
+      opts.on( '-r', '--recursive', 'Include children and subdirectories' ) {
+        @options.recursive = true
+      }
+      opts.on( '-t', '--type str', 'Node type [default: all]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    @options.dest = @options.paths.pop
+
+    if ! @options.repo || ! @options.dest || (@options.paths.empty?) 
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    @options.paths.count > 1 ? \
+      move_multi(repo, @options.paths, @options.dest) : 
+      move(repo, @options.paths.first, @options.dest)
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def move_multi(repo, paths, dest)
+    # force 'dest' to be interpreted as a directory
+    if (! dest.end_with? '/')
+      dest += '/'
+    end
+
+    paths.each do |path|
+      new_path = File.join(dest, File.basename(path))
+      move(repo, path, new_path)
+    end
+  end
+
+  def move(repo, path, dest)
+    PlanR::Application::DocumentManager.move_path(repo, path, dest,
+                                        arg_to_node_type(@options.node_type),
+                                        @options.recursive, @options.replace)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

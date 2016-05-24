@@ -1,0 +1,128 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run tokenize_doc plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.input = false
+    @options.plugin = nil
+    @options.parser = nil
+    @options.analyzer = nil
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} -p NAME REPO PATH"
+      opts.separator "Run tokenize_doc plugin on a Document in a Plan-R repo"
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-A', '--analyzer str', 'Plugin to use for analyzing',
+              'By default DocumentManager will use the fittest.',
+              'Try "--analyzer help" to list available plugins.') { |str|
+        @options.analyzer = str
+      }
+      opts.on('-p', '--plugin str', 'Plugin to use for tokenizer') { |str| 
+        @options.plugin = str 
+      }
+      opts.on('-P', '--parser str', 'Plugin to use for parsing',
+              'By default DocumentManager will use the fittest.',
+              'Try "--parser help" to list available plugins.') { |str|
+        @options.parser = str
+      }
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.input = args.shift
+
+    if (! @options.repo) or (! @options.input)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    plugin_help = nil
+    if @options.plugin and @options.plugin == 'help'
+      plugin_help = 1
+      puts "Plugins providing :tokenize_doc :"
+      PlanR::Application::PluginManager.providing(:tokenize_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+    end
+    if @options.parser and @options.parser == 'help'
+      plugin_help = 1
+      puts "Plugins providing :parse_doc :"
+      PlanR::Application::PluginManager.providing(:parse_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+    end
+    if @options.analyzer and @options.analyzer == 'help'
+      plugin_help = 1
+      puts "Plugins providing :analyze_doc :"
+      PlanR::Application::PluginManager.providing(:analyze_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+    end
+    return if plugin_help
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    ctype = arg_to_node_type(@options.node_type)
+    doc = PlanR::Application::DocumentManager.doc_factory(repo, @options.input,
+                                                          ctype)
+    if doc
+      parse_and_tokenize_document(doc)
+    else
+      $stderr.puts "#{path} not found in repo"
+    end
+
+    PlanR::Application::RepoManager.close(p)
+  end
+
+  def parse_and_tokenize_document(doc)
+    # parse using user-specified plugin, or default
+    pdoc = nil
+    if @options.parser
+      pdoc = PlanR::Application::DocumentManager.parse_doc(doc, @options.parser)
+    end
+
+    # analyze using user-specified plugin, or default
+    ar_hash = nil
+    if @options.analyzer
+      ar_hash = PlanR::Application::DocumentManager.analyze_doc(doc, pdoc, 
+                                                              false, 
+                                                              @options.analyzer)
+    end
+
+    toks = PlanR::Application::DocumentManager.tokenize_doc(doc, pdoc, ar_hash,
+                                                            @options.plugin)
+    toks.each do |plugin, ts|
+      puts plugin
+      ts.each { |t| puts "\t" + t.inspect }
+    end
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

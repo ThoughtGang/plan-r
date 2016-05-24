@@ -1,0 +1,83 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for adding a Dict to a repository
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+require 'plan-r/document/dict'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.dest = nil
+    @options.contents = nil
+    @options.format = :json
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-nst] REPO DEST [DATA]"
+      opts.separator "Add a Dict to a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DEST is a repo path"
+      opts.separator " * DATA is the dict content."
+      opts.separator "If DATA is not provided, STDIN will be read."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-f', '--format str', 'Input format: ini, json [json]',
+               'Try "-f help"' ) { |str|
+        @options.format = str.downcase.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+
+    if @options.format == :help
+      puts "Supported formats:\n  ini  json"
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.dest = args.shift
+    @options.contents = args.shift
+
+    if ! @options.repo || ! @options.dest
+      $stderr.puts "#{@options.repo ? 'DEST' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+   contents = generate_content(@options.contents || ARGF.read)
+
+    doc_mgr = PlanR::Application::DocumentManager
+    props = doc_mgr.default_properties(:dict)
+    props[:create_app] = 'plan-r-add-dict' 
+    doc_mgr.new_file(repo, :dict, @options.dest, contents, props)
+
+    PlanR::Application::RepoManager.close(repo, true)
+  end
+
+  def generate_content(data)
+    case @options.format
+    when :json
+      PlanR::Dict.from_json(data.chomp)
+
+    when :ini
+      PlanR::Dict.from_ini(data.chomp)
+
+    else
+      raise "Invalid table content type '#{@options.format}'"
+    end
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

@@ -1,0 +1,166 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for adding a Script to a repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/script_mgr'
+require 'plan-r/repo'
+
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.dest = nil
+    @options.contents = nil
+    @options.language = 'Ruby'
+    @options.editor = nil
+    @options.interpreter = nil
+    @options.doc_path = []
+    @options.doc_type = :document
+    @options.replace = false
+    @options.doc_only = false
+    @options.no_init = false
+    @options.index = false
+    @options.sync_policy = PlanR::Application::DocumentManager::SYNC_MANUAL
+    @options.sync_method = PlanR::Application::DocumentManager::SYNC_REPLACE
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-nst] REPO DEST [CODE]"
+      opts.separator "Add a Script to a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * DEST is a repo path"
+      opts.separator " * CODE is the script content."
+      opts.separator "If CODE is not provided, STDIN will be read."
+      # USE set-property to remove origin
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-d', '--doc path', 'Use script as origin for document',
+              'Multiple -d paths can be specified') { |str|
+        @options.doc_path << str
+      }
+      opts.on('-E', '--editor str', 'Override editor plugin') { |str|
+        @options.editor = str
+      }
+      opts.on('-f', '--force', 'Overwrite existing script/document') {
+        @options.replace = true
+      }
+      opts.on('-I', '--interpreter str', 'Override interpreter plugin') { |str|
+        @options.interpreter = str
+      }
+      opts.on('-L', '--language str', 'Script language', 'Try "-L help"'){ |str|
+        @options.language = str
+      }
+
+      opts.separator "Document (-d) Options:"
+      opts.on('-t', '--type str', 'Document node-type',
+              'The type of document specified by -d',
+              'Default is "document". Try "-t help"' ) { |str|
+        @options.doc_type = str.to_sym
+      }
+      opts.on('--append-on-update', 'Append document on sync',
+              'Append script output to contents of',
+              'document specified by -d. The default',
+              'is to replace the document contents.') {
+        @options.sync_method = PlanR::Application::DocumentManager::SYNC_APPEND
+      }
+      opts.on('--doc-only', 'Do not create the script',
+              'This is used with -d to associate a document',
+              'with an existing script.') {
+        @options.doc_only = true
+      }
+      opts.on('--index-doc', 'Index document',
+              'Index the document specified by -d.',
+              'The default is not to index.') {
+        @options.index = true
+      }
+      opts.on('--no-init', 'Do not initialize document',
+         'If this is not set, and -d is specified, the',
+         'script will be run to populate the document') {
+        @options.no_init = true
+      }
+      opts.on('--on-access', 'Update document on access',
+              'This causes the document specified by -d',
+              'to be updated (by running the script)',
+              'every time it is accessed. The default is',
+              'to update only when requested (manual).') {
+        @options.sync_policy = PlanR::Application::DocumentManager::SYNC_ACCESS
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.doc_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.dest = args.shift
+    @options.contents = args.shift
+
+    if ! @options.repo || ! @options.dest
+      $stderr.puts "#{@options.repo ? 'DEST' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.language == 'help'
+      puts "Languages:"
+      puts PlanR::Application::ScriptManager.languages.join("\n")
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    contents = @options.contents || ARGF.read
+    if (! contents) and (! @options.doc_only)
+      raise "Contents must be provided if --doc-only is not specified"
+    end
+
+
+
+    doc_mgr = PlanR::Application::DocumentManager
+    ctype = arg_to_node_type(@options.doc_type)
+    scpt = nil
+    if ! @options.doc_only
+
+      props = doc_mgr.default_properties(:script)
+      scpt = PlanR::Application::ScriptManager.create(repo, 
+                                                      @options.dest, contents,
+                                                      @options.language, 
+                                                      @options.interpreter, 
+                                                      @options.editor, props)
+    end
+
+    scpt ||=  PlanR::Application::ScriptManager.script(repo, @options.dest)
+    if (! scpt)
+      $stderr.puts "Script '#{@options.dest}' does not exist in repo"
+      return
+    end
+
+    sep = (@options.dest.start_with? '/') ? '' : '/'
+    uri = URI.parse('script:' + sep + @options.dest)
+    props = { :origin => uri.to_s,
+      :index => @options.index,
+      :sync_policy => @options.sync_policy,
+      :sync_method => @options.sync_method
+    }
+    @options.doc_path.each do |doc_path|
+      doc_contents = @options.no_init ? '' : 
+                     PlanR::Application::ScriptManager.exec(scpt, '')
+      doc = doc_mgr.new_file(repo, ctype, doc_path, doc_contents, props)
+    end
+
+    PlanR::Application::RepoManager.close(repo, true)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

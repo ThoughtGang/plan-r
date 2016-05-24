@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for listing Plan R plugins
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+
+class App < PlanR::CliApplication
+  def self.disable_db?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options = OpenStruct.new
+    @options.patterns = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [GLOB] [...]"
+      opts.separator "List plugins matching pattern, or all plugins."
+      standard_cli_options(opts)
+      end
+    opts.parse!(args)
+
+    args.each do |arg|
+      pat = arg.gsub('*','.*').gsub('?','.?')
+      @options.patterns << /^.*#{pat}.*$/ 
+    end
+  end
+
+  def start
+    limit = (! @options.patterns.empty?)
+    PlanR::Application::PluginManager.plugins.values.sort { |a,b|
+      a.name <=> b.name }.each do |p|
+      next if limit && (@options.patterns.select{|pat| p.name =~ pat}.empty?)
+      puts p.name
+    end
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec()
+end
+

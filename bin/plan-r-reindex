@@ -1,0 +1,116 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run index plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.paths = []
+
+    @options.plugin_names = []
+    @options.indexers = []
+    @options.force = false
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO [PATH] [...]"
+      opts.separator "Run index_doc plugin on a Document in a Plan-R repo."
+      opts.separator "This will also parse, tokenize, and analyze the Document"
+      opts.separator "in preparation for indexing."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-f', '--force', 'Force indexing of non-indexed documents',
+              'This is used to override document property indexed=FALSE') {
+        @options.force = true
+      }
+
+      opts.on('-p', '--plugin str', 'Specify plugin to index doc with',
+              'By default all index plugins will be used.',
+              'Try "-p help" to list available plugins.' ) { |str| 
+        @options.plugin_names << str 
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+
+    while args.length > 0
+      @options.paths << args.shift
+    end
+
+    if ! @options.repo
+      $stderr.puts "REPO' argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.plugin_names.include? 'help'
+      puts "Plugins providing :index_doc :"
+      PlanR::Application::PluginManager.providing(:index_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+    p = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! p
+
+    load_plugins
+
+    if @options.paths.empty?
+      PlanR::Application::DocumentManager.reindex(p.repo, @options.force) 
+    end
+
+    @options.paths.each do |path|
+      doc = PlanR::Application::DocumentManager.doc_factory(p.repo, path)
+      if ! doc
+        $stderr.puts "'#{path}' not in repo"
+        next
+      end
+      perform_index(p.repo, doc)
+    end
+
+    PlanR::Application::RepoManager.close(p)
+  end
+
+  def load_plugins
+    if @options.plugin_names.empty?
+      @options.indexers = PlanR::Application::PluginManager.providing(
+                         :index_doc ).map { |(p, rating)| p }
+    else
+      @options.plugin_names.each do |name|
+        p = PlanR::Application::PluginManager.find(name)
+        if p
+          @options.indexers << p if p
+        else
+          $stderr.puts "Could not find plugin '#{name}' for :index_doc"
+        end
+      end
+    end
+
+  end
+
+  def perform_index(repo, doc)
+    tok_docs = PlanR::Application::DocumentManager.tokenize_doc(doc)
+
+    @options.indexers.each do |p|
+      p.spec_invoke(:index_doc, repo, doc, tok_docs, @options.force)
+    end
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

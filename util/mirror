@@ -1,0 +1,160 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+require 'nokogiri'
+require 'net/http'
+require 'fileutils'
+require 'uri'
+
+# TODO: handle 404s 
+class RemoteDocument
+  attr_reader :uri
+  attr_reader :contents
+  attr_reader :css_files, :js_files, :img_files
+
+=begin rdoc
+=end
+  def initialize(uri)
+    @uri = uri
+    source = html_get(uri)
+    @contents = Nokogiri::HTML( source )
+    find_css_files
+    find_js_files
+    find_img_files
+    find_meta_tags
+    find_links
+  end
+
+=begin rdoc
+=end
+  def find_css_files
+    @css_tags = @contents.xpath( '//link[@rel="stylesheet"]' )
+    @css_files = @css_tags.map { |t| t[:href] }
+  end
+
+=begin rdoc
+=end
+  def find_js_files
+    @js_tags = @contents.xpath('//script[@src]')
+    @js_files = @js_tags.map { |t| t[:src] }
+  end
+
+=begin rdoc
+=end
+  def find_img_files
+    @img_tags = @contents.xpath( '//img[@src]' )
+    @img_files = @img_tags.map { |t| t[:src] }
+  end
+
+=begin rdoc
+=end
+  def find_meta_tags
+    @meta = {}
+    @contents.xpath('//meta').each do |tag|
+      last_name = name = value = nil
+      tag.attributes.each do |key, attr|
+        if attr.name == 'content'
+          value = attr.value
+        elsif attr.name == 'name'
+          name = attr.value
+        else
+          last_name = attr.value
+        end
+      end
+      name = last_name if not name
+      @meta[name] = value if name && value
+    end
+  end
+
+=begin rdoc
+=end
+  def find_links
+    @a_tags = @contents.xpath('//a[@href]')
+    # TODO: do something with tags
+  end
+
+=begin rdoc
+=end
+  def localize_url(url, dir)
+    path = url.gsub(/^[|[:alpha]]+:\/\//, '')
+    path.gsub!(/^[.\/]+/, '')
+    path.gsub!(/[^-_.\/[:alnum:]]/, '_')
+    File.join(dir, path)
+  end
+
+=begin rdoc
+=end
+  def url_for(str)
+    return str if str =~ /^[|[:alpha]]+:\/\//
+    File.join((uri.path.empty?) ? uri.to_s : File.dirname(uri.to_s), str)
+  end
+
+=begin rdoc
+Senf GET to url, following redirects if required.
+=end
+  def html_get(url)
+    resp = Net::HTTP.get_response(url)
+    if resp.code == '404'
+      # Create a 0-byte file if not found
+      return ''
+    elsif ['301', '302', '307'].include? resp.code
+      url = URI.parse resp['location']
+    end
+    Net::HTTP.get url
+  end
+
+=begin rdoc
+=end
+  def download_resource(url, path)
+    FileUtils.mkdir_p File.dirname(path)
+    the_uri = URI.parse(url)
+    if the_uri
+      html = html_get the_uri
+      File.open(path, 'wb') { |f| f.write(html) } if html && (! html.empty?)
+    end
+  end
+
+=begin rdoc
+=end
+  def localize(tag, sym, dir)
+    sleep(rand / 100)
+    url = tag[sym]
+    img_url = url_for(url)
+    path = localize_url(url, dir)
+    download_resource(img_url, path)
+    tag[sym.to_s] = path.partition(File.dirname(dir) + File::SEPARATOR).last
+  end
+
+=begin rdoc
+=end
+  def save_locally(dir)
+    Dir.mkdir(dir) if ! File.exist? dir
+
+    @img_tags.each { |tag| localize(tag, :src, File.join(dir, 'images')) }
+    @js_tags.each { |tag| localize(tag, :src, File.join(dir, 'js')) }
+    @css_tags.each { |tag| localize(tag, :href, File.join(dir, 'css')) }
+    
+    # remove HTML BASE tag if it exists
+    @contents.xpath('//base').each { |t| t.remove }
+
+    save_path = File.join(dir, File.basename(uri.to_s))
+    save_path += '.html' if save_path !~ /\.((html?)|(txt))$/
+    File.open(save_path, 'w') { |f| f.write(@contents.to_html) }
+  end
+end
+
+def dload(url, dir)
+  uri = URI.parse(url)
+  doc = RemoteDocument.new(uri)
+  doc.save_locally(dir)
+end
+
+if __FILE__ == $0
+  if ARGV.count < 2
+    $stderr.puts 'Usage: mirror URL DIR'
+    exit 1
+  end
+
+  url = ARGV.shift
+  dir = ARGV.shift
+  dload(url, dir)
+end

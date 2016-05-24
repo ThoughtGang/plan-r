@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Utility for listing the full path to contents of a Plan R repo
+
+require 'plan-r/application/cli'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def self.disable_plugins?; true; end
+  def self.disable_jruby?; true; end
+  def self.disable_vcs?; true; end
+  def self.disable_database?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.node_type = :document
+    @options.paths = []
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} [-t str] REPO [PATH] [...]"
+      opts.separator "Display the full path to contents of a Plan-R."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a content path in the repo."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+
+    @options.paths = args
+    @options.paths << '/' if (@options.paths.empty?)
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+    
+
+    @options.paths.each do |path|
+      puts repo.abs_path(path, @options.node_type)
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

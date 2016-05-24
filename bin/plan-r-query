@@ -1,0 +1,249 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Query keyword index in a Plan R repository
+
+
+# TODO: CSV, JSON output 
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/application/query_mgr'
+require 'plan-r/datatype/query'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+  def self.disable_vcs?; true; end
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.query = nil
+
+    @options.plugin = nil
+    @options.show_context = false
+    @options.show_score = false
+    @options.max_results = nil
+    @options.detail = false
+    @options.debug_parse_query = false
+    @options.display_index_docs = false
+    @options.display_index_keywords = false
+    @options.display_index_log = false
+    @options.display_index_report = false
+    @options.display_index_stats = false
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} REPO QUERY"
+      opts.separator "Run a query_index plugin on a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-c', '--context', 'Display context of match') {
+        @options.show_context = true
+      }
+      opts.on('-n', '--max-hits num', 'Display up to "num" results') { |num|
+        @options.max_results = Integer(num)
+      }
+      opts.on('--detail', 'Display detailed document listing') {
+        @options.detail = true
+      }
+      opts.on('-p', '--plugin str', 'Specify plugin to use for query',
+              'Default: all plugins',
+              'Try "-p help" to list available plugins') { |str| 
+        @options.plugin = str 
+      }
+      opts.on('-s', '--score', 'Display document score') {
+        @options.show_score = true
+      }
+      # TODO --fuzzy|glob? --filter {category}? --opts str ?
+
+      opts.separator "Index Diagnostics Options:"
+      opts.on('--docs', 'List documents indexed by plugin') {
+        @options.display_index_docs = true
+      }
+      opts.on('--keywords', 'Print keyword stats') {
+        @options.display_index_keywords = true
+      }
+      opts.on('--log', 'Print index log') {
+        @options.display_index_log = true
+      }
+      opts.on('--parse', 'Parse query to Hash for debugging') {
+        @options.debug_parse_query = true
+      }
+      opts.on('--report', 'Print index report') {
+        @options.display_index_report = true
+      }
+      opts.on('--stats', 'Print index stats') {
+        @options.display_index_stats = true
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+
+    @options.repo = args.shift
+    @options.query = args.join(' ')
+
+    if ! @options.repo
+      $stderr.puts "REPO argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.plugin and @options.plugin == 'help'
+      puts "Plugins providing :query_index :"
+      PlanR::Application::PluginManager.providing(:query_index).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    # display diagnostics in order of increasing utility
+    # FIXME: these should really use QueryManager
+    print_index_log(repo) if @options.display_index_log
+    print_index_docs(repo) if @options.display_index_docs
+    print_index_keywords(repo) if @options.display_index_keywords
+    print_index_stats(repo) if @options.display_index_stats
+    print_index_report(repo) if @options.display_index_report
+
+    perform_query(repo) if @options.query and (! @options.query.empty?)
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def perform_query(repo)
+    query = build_query
+    if @options.debug_parse_query
+      display_parsed_query(repo, query)
+    end
+    PlanR::Application::QueryManager.perform(repo, query, @options.plugin
+                                            ).each do |name, results|
+      puts "----------" 
+      puts "[#{name}]"
+      display_results(repo, results)
+    end
+  end
+
+  def build_query
+    # TODO: fields, num hits, query options
+    #       @options.show_context
+    PlanR::Query.new(@options.query)
+  end
+
+  def display_results(repo, arr)
+    arr.each_with_index do |hit, idx|
+      doc = PlanR::Application::DocumentManager.doc_factory(repo, hit.path, 
+                                                            hit.ctype)
+      if (! doc)
+        "QUERY RESULTS contain bad DOC ID: '#{hit.path}' [#{hit.ctype}]"
+        next
+      end
+
+      elem = []
+      elem << ("[%3d]" % hit.score) if @options.show_score
+      elem << doc.node_type if @options.detail
+      elem << doc.path
+      puts '    ' + elem.join("\t")
+      break if (@options.max_results) and (idx >= @options.max_results)
+      #FIXME: implement context in query!
+      #if @options.show_context
+      #  puts context
+      #end
+    end
+  end
+
+  def display_parsed_query(repo, query)
+    puts "PARSED QUERY"
+    PlanR::Application::QueryManager.parse_query(repo, query, @options.plugin
+                                              ).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      puts '    ' + obj.inspect
+    end
+    puts "____________________________________________________________________"
+  end
+
+  def print_index_log(repo)
+    puts "INDEX LOG"
+    # TODO: support options to send to lugin
+    opts = { }
+    PlanR::Application::QueryManager.index_log(repo, opts, @options.plugin
+                                              ).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      puts obj.to_s
+    end
+    puts "____________________________________________________________________"
+  end
+
+  def print_index_docs(repo)
+    puts "INDEXED DOCUMENTS"
+    opts = { }
+    PlanR::Application::QueryManager.index_docs(repo, opts, 
+                                            @options.plugin).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      obj.each { |arr| puts "[#{arr.first}] #{arr.last}" }
+    end
+    puts "____________________________________________________________________"
+  end
+
+  def print_index_keywords(repo)
+    puts "INDEX KEYWORDS"
+    opts = { :stats => @options.detail }
+    PlanR::Application::QueryManager.index_keywords(repo, opts, 
+                                            @options.plugin).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      if (obj.kind_of? Hash)
+        # Hash of keyword => count
+        obj.each { |k,v| puts "    [%8d] %s" % [v, k] }
+      else
+        # Array of keyword
+        obj.each { |x| puts "    #{x}" }
+      end
+      # FIXME: really this needs better display options
+      #keywords.keys.sort.each do |k|
+      #  puts "\t#{k}"
+      #  keywords[k].each do |id, h|
+      #    puts "\t\t%s (%d) %s" % [ id, h[:frequency], 
+      #                              (h[:positions] || []).inspect ]
+      #  end
+      #end
+    end
+    puts "____________________________________________________________________"
+  end
+
+  def print_index_stats(repo)
+    puts "INDEX STATS"
+    # TODO: support options to send to plugin
+    opts = { }
+    PlanR::Application::QueryManager.index_stats(repo, opts, 
+                                            @options.plugin).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      puts obj.inspect
+    end
+    puts "____________________________________________________________________"
+  end
+
+  def print_index_report(repo)
+    puts "INDEX REPORT"
+    # TODO: support options to send to plugin
+    opts = { }
+    PlanR::Application::QueryManager.index_report(repo, opts, 
+                                            @options.plugin).each do |name,obj|
+      puts "----------" 
+      puts "[#{name}]"
+      puts obj.to_s
+    end
+    puts "____________________________________________________________________"
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end

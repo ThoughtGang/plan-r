@@ -1,0 +1,102 @@
+#!/usr/bin/env ruby
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+# Run parse_doc plugin on document in a Plan R repository
+
+require 'plan-r/application/cli'
+require 'plan-r/application/plugin_mgr'
+require 'plan-r/repo'
+
+class App < PlanR::CliApplication
+
+  def handle_options(args)
+    @options.repo = nil
+    @options.input = nil
+    @options.plugin = nil
+    @options.node_type = :document
+
+    opts = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename $0} -p NAME REPO PATH"
+      opts.separator "Run a parse_doc plugin on a Document in a Plan-R repo."
+      opts.separator " * REPO is the path to a Plan-R repo dir."
+      opts.separator " * PATH is a path in the Repo repo."
+      opts.separator "The results are written to STDOUT."
+      opts.separator "NOTE: The parser plugin creates a ParsedDocument."
+      opts.separator "This is basically a collection of text blocks"
+      opts.separator "extracted from the (formatted) document."
+      opts.separator ""
+      opts.separator "Options:"
+      opts.on('-p', '--plugin str', 'Specify plugin to use for parser',
+              'If not supplied, the fittest plugin will',
+              'be used. Try "-p help" for a list.' ) { |str| 
+        @options.plugin = str 
+      }
+      opts.on( '-t', '--type str', 'Node type [default: document]',
+               'Try "-t help"' ) { |str|
+        @options.node_type = str.to_sym
+      }
+
+      standard_cli_options(opts)
+    end
+    opts.parse!(args)
+    if @options.node_type == :help
+      puts "Node types:"
+      puts available_node_types.join("\n")
+      exit -1
+    end
+
+    @options.repo = args.shift
+    @options.input = args.shift
+
+    if (! @options.repo) or (! @options.input)
+      $stderr.puts "#{@options.repo ? 'PATH' : 'REPO'} argument required!"
+      puts opts
+      exit -1
+    end
+  end
+
+  def start
+    if @options.plugin and @options.plugin == 'help'
+      puts "Plugins providing :parse_doc :"
+      PlanR::Application::PluginManager.providing(:parse_doc).each do |p, r|
+        puts "[#{r}] #{p.name} : #{p.description}"
+      end
+      return
+    end
+
+
+    repo = PlanR::Application::RepoManager.open(@options.repo)
+    raise "Unable to open repo at '#{@options.repo}'" if ! repo
+
+    ctype = arg_to_node_type(@options.node_type)
+    doc = PlanR::Application::DocumentManager.doc_factory(repo, @options.input,
+                                                          ctype)
+    if doc
+      pdoc = PlanR::Application::DocumentManager.parse_doc(doc, @options.plugin)
+      display_parsed_doc(pdoc)
+    else
+      $stderr.puts "'#{path}' not in repo"
+    end
+
+    PlanR::Application::RepoManager.close(repo)
+  end
+
+  def display_parsed_doc(pdoc)
+    puts "Parser: #{pdoc.parser}"
+
+    puts "\nResources:"
+    pdoc.external_refs.each do |k,v|
+      puts "\t#{k.to_s}:"
+      v.each { |item| "\t\t" + item.to_s }
+    end
+    puts "\nKeywords:"
+    pdoc.keywords.each { |item| puts "\t" + item }
+    puts "\nProperties:"
+    pdoc.properties.each { |k,v| puts "\t#{k.to_s}: #{v}" }
+    puts "\nText Blocks:"
+    pdoc.text_blocks.each { |str| puts "\t" + str.inspect }
+  end
+end
+
+if __FILE__ == $0
+  App.new(ARGV).exec
+end
