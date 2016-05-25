@@ -60,8 +60,8 @@ arguments, then initializes all Services.
       # declare services
       if (! @options.no_services)
         use ConfigManager
-        use PluginManager unless plugins_disabled?
         use JRuby unless java_disabled?
+        use PluginManager unless plugins_disabled?
         use RevisionControl unless vcs_disabled?
 
         init_services

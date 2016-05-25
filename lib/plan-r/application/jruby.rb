@@ -137,7 +137,11 @@ found.
             $stderr.puts "No JRUBY found!"
             return 1
           end
+          # add plugin path for loading shared/jruby moules
           ENV['PLANR_PLUGIN_PATH'] = path
+          # add Plan-R path in case it doesn't exist as a JRuby gem
+          ENV['PLANR_BASE_PATH'] = File.expand_path(File.dirname(File.dirname(
+                                                    File.dirname(__FILE__))))
           exec "#{@jruby} #{JRUBY_DAEMON} #{@server_port}"
         end
 

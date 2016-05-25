@@ -10,6 +10,20 @@ require 'tg/plugin'
 require 'tg/plugin_mgr'
 require 'plan-r/application/service'
 
+$TG_PLUGIN_DEBUG=true
+# attempt to load plan-r-plugins gem.
+begin
+  gem 'plan-r-plugins'
+rescue Gem::LoadError => e
+  # not an error: we could be running from Repo.
+end
+# attempt to load plan-r-plugins gem.
+begin
+  gem 'plan-r-lucene'
+rescue Gem::LoadError => e
+  # not an error: lucene is optional
+end
+
 module PlanR
 
   module Application
@@ -47,9 +61,17 @@ Example:
 
       CONF_NAME = 'plugins'
 
-      # TG::PluginManager assumes one spec dir; add support for more.
-      @plan_r_spec_dirs = [ File.join( File.dirname(File.dirname(__FILE__)), 
-                                       'plugins/shared/specification' ) ]
+      # Add all plan-r/plugin/shared/specification directories in load path
+      @plan_r_spec_dirs = $:.select { |dir|
+        File.exist? File.join(dir, 'plan-r', 'plugins', 
+                              'shared', 'specification')
+        }.map { |dir| 
+          File.join(dir, 'plan-r', 'plugins', 'shared', 'specification')
+        }
+      @plan_r_spec_dirs << File.join( File.dirname(File.dirname(__FILE__)),
+                                      'plugins', 'shared', 'specification' 
+                                     ) if @plan_r_spec_dirs.empty?
+
       def self.add_spec_dir(dir)
         @plan_r_spec_dirs << dir
       end
@@ -70,7 +92,9 @@ that are not blacklisted.
         add_base_dir File.join('plan-r', 'plugins')
 
         read_config
-        app_init
+
+        # NOTE: app_init is called in startup, as we do not want plugins
+        #       loaded until JRuby as a chance to start
       end
 
 =begin rdoc
@@ -106,6 +130,7 @@ Invoke Plugin#application_startup(app) in every loaded plugin.
 This should be invoked after an application has completed startup.
 =end
       def self.startup(app)
+        app_init
         app_startup(app)
         self.providing(:app_startup).each do |p, rating|
           p.spec_invoke(:app_startup, app)
@@ -161,7 +186,6 @@ This should be invoked after an application is about to commence shutdown.
         Repo::EVENT_PROPS  => :repo_doc_prop_change,
         Repo::EVENT_TAG    => :repo_doc_tag_change,
         Repo::EVENT_META   => :repo_doc_meta_change,
-        Repo::EVENT_DB     => :repo_db_connect,
         Repo::EVENT_SAVE   => :repo_save,
         Repo::EVENT_CLOSE  => :repo_close
       }

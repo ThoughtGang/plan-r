@@ -79,8 +79,18 @@ on the resulting path if it exists.
 =end
   def self.load_modules(plugin_path)
     plugin_path.split(':').each do |path|
-      mod_path = File.join(path, 'shared', 'jruby')
+      mod_path = File.expand_path(File.join(path, 'shared', 'jruby'))
       next if ! (File.directory? mod_path)
+
+      # add lib directory to load path so files in plan-r/plugins/shared/jruby 
+      # can require each other
+      base_path = File.expand_path(File.dirname(File.dirname(path)))
+      if (File.exist? File.join(base_path, 'plan-r')) and
+         (! $:.include? base_path)
+        $: << base_path # at end of path so nothing can go wrong
+      end
+
+      # load all ruby modues in directlry
       load_module_dir mod_path
     end
   end
@@ -147,6 +157,15 @@ if __FILE__ == $0
   port = ARGV.count > 0 ? ARGV.first.to_i : JRubyDaemon::DEFAULT_PORT
   rv = 0
   begin
+
+    # if Plan-R is not already available as a gem, make it available
+    begin
+      require 'plan-r'
+    rescue LoadError
+      mod_path = ENV['PLANR_BASE_PATH']
+      $: << mod_path if File.exist?(mod_path)
+    end
+
     JRubyDaemon.start(port, ENV['PLANR_PLUGIN_PATH'])
 
   rescue Errno::EADDRINUSE

@@ -1,0 +1,9 @@
+[submodule "plan-r-lucene"]
+	path = plan-r-lucene
+	url = git://github.com/ThoughtGang/plan-r-lucene
+[submodule "rugged"]
+	path = rugged
+	url = https://github.com/libgit2/rugged.git
+[submodule "tg-plugins"]
+	path = tg-plugins
+	url = git://github.com/ThoughtGang/tg-plugins

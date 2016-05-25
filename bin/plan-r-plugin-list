@@ -7,7 +7,7 @@ require 'plan-r/application/plugin_mgr'
 
 class App < PlanR::CliApplication
   def self.disable_db?; true; end
-  def self.disable_jruby?; true; end
+  #def self.disable_jruby?; true; end
   def self.disable_vcs?; true; end
 
   def handle_options(args)
