@@ -1,0 +1,263 @@
+# Ruby Rakefile for Plan R Framework
+# (c) Copyright 2016 Thoughtgang <http://www.thoughtgang.org>
+
+MOD_NAME    = 'plan-r'
+MOD_VERSION = '0.4.1'
+MOD_SUMMARY = 'Plan R document management framework'
+MOD_DESCR   = 'Ruby modules and command-line utilities for managing 
+repositories of related documents.'
+
+require 'rdoc/task'
+require 'rake/testtask'
+require 'rubygems/package_task'
+require 'fileutils'
+require 'rbconfig'
+
+# ---------------------------------------------------------------------- 
+# FILES
+
+# recursively include all .rb files in path
+def files_in_path(path)
+  files = [ path + File::SEPARATOR + '*.rb' ]
+  dirs = Dir.new(path).reject{ |f| f.start_with? '.' 
+                     }.collect { |f| path + File::SEPARATOR + f 
+                     }.select { |f| File.directory? f }.each { |d|
+                       files.concat(files_in_path(d)) 
+                     }
+  files
+end
+
+BIN_FILES = FileList[ 'bin/*' ]
+MOD_FILES = FileList[ 'lib/plan-r.rb', 
+                      'lib/plan-r/*.rb',
+                      'lib/plan-r/conf/*',
+                      'lib/plan-r/plugins/shared/specification.rb',
+                      files_in_path('lib/plan-r/application'),
+                      files_in_path('lib/plan-r/bin'),
+                      files_in_path('lib/plan-r/content_repo'),
+                      files_in_path('lib/plan-r/datatype'),
+                      files_in_path('lib/plan-r/document'),
+                      files_in_path('lib/plan-r/plugins/shared/specification'),
+                      files_in_path('lib/plan-r/util') 
+]
+PLUGIN_FILES = FileList[ 'lib/plan-r/plugins/*.rb',
+                         files_in_path('lib/plan-r/plugins/analysis'),
+                         files_in_path('lib/plan-r/plugins/data_source'),
+                         files_in_path('lib/plan-r/plugins/import_export'),
+                         files_in_path('lib/plan-r/plugins/interpreter'),
+                         files_in_path('lib/plan-r/plugins/parser'),
+                         files_in_path('lib/plan-r/plugins/search'),
+                         files_in_path('lib/plan-r/plugins/shared/picky')
+]
+
+# ---------------------------------------------------------------------- 
+namespace :build do
+  # build documentation
+
+  # build package
+  base_spec = Gem::Specification.new do |spec|
+    spec.name = MOD_NAME
+    spec.version = MOD_VERSION
+    spec.summary = MOD_SUMMARY
+    spec.description = MOD_DESCR
+
+    spec.authors = 'https://github.com/ThoughtGang'
+    spec.email = 'mkfs@users.noreply.github.com'
+    spec.homepage = 'https://github.com/ThoughtGang/plan-r'
+    spec.licenses = [ 'POGO', 'BSD' ]
+
+    spec.required_ruby_version = '>= 2.2.0'
+    spec.requirements = []
+    spec.add_dependency('tg-plugins', '>= 1.2')
+    spec.add_dependency('grit', '>= 2.5.0')
+    #spec.add_dependency('rugged', '>= 0.24.0')
+    #mime-types mime-types-data 
+
+    spec.files = MOD_FILES
+  end
+
+  bin_spec = Gem::Specification.new do |spec|
+    spec.name = MOD_NAME + '-bin'
+    spec.version = MOD_VERSION
+    spec.summary = MOD_SUMMARY + ' - command-line utilities'
+    spec.description = MOD_DESCR
+
+    spec.authors = 'https://github.com/ThoughtGang'
+    spec.email = 'mkfs@users.noreply.github.com'
+    spec.homepage = 'https://github.com/ThoughtGang/plan-r'
+    spec.licenses = [ 'POGO', 'BSD' ]
+
+    spec.required_ruby_version = '>= 2.2.0'
+    spec.requirements = []
+    spec.add_dependency(MOD_NAME, '>= ' + MOD_VERSION)
+
+    spec.executables = BIN_FILES.map { |x| File.basename(x) }
+  end
+
+  plugin_spec = Gem::Specification.new do |spec|
+    spec.name = MOD_NAME + '-plugins'
+    spec.version = MOD_VERSION
+    spec.summary = MOD_SUMMARY + ' - plugins'
+    spec.description = MOD_DESCR
+
+    spec.authors = 'https://github.com/ThoughtGang'
+    spec.email = 'mkfs@users.noreply.github.com'
+    spec.homepage = 'https://github.com/ThoughtGang/plan-r'
+    spec.licenses = [ 'POGO', 'BSD' ]
+
+    spec.required_ruby_version = '>= 2.2.0'
+    spec.add_dependency(MOD_NAME, '>= ' + MOD_VERSION)
+    spec.add_dependency('picky', '>= 4.31.3')
+    spec.add_dependency('picky-generators', '>= 4.31.3')
+    spec.add_dependency('picky-statistics', '>= 4.31.3')
+    spec.add_dependency('nokogiri', '>= 1.6.6')
+    spec.add_dependency('whatlanguage', '>= 1.0.5')
+    spec.add_dependency('summarize', '>= 1.0.3')
+
+    spec.files = PLUGIN_FILES
+  end
+
+  desc 'Build Plan-R module .gem'
+  Gem::PackageTask.new(base_spec) do |pkg|
+    pkg.need_zip = false
+    pkg.need_tar = true
+  end
+
+  desc 'Build Plan-R CLI utilities .gem'
+  Gem::PackageTask.new(bin_spec) do |pkg|
+    pkg.need_zip = false
+    pkg.need_tar = true
+  end
+
+  desc 'Build Plan-R plugins .gem'
+  Gem::PackageTask.new(plugin_spec) do |pkg|
+    pkg.need_zip = false
+    pkg.need_tar = true
+  end
+
+  desc 'Build gem for TG-Plugins submodule'
+  task 'tg-plugins' do
+    Dir.chdir('dependencies/tg-plugins')
+    %x{rake gem}
+    pkgdir = '../../pkg'
+    FileUtils.mkdir(pkgdir) if (! File.directory? pkgdir)
+    Dir.glob(File.join('pkg', '*.gem')) do |ent|
+      FileUtils.mv(ent, pkgdir)
+    end
+    Dir.chdir('../..')
+  end
+
+end
+
+# ---------------------------------------------------------------------- 
+namespace :doc do
+  RDOC_EXTRA_FILES = FileList[ 'doc/*.rdoc' ]
+  EXAMPLE_FILES = FileList[ files_in_path('doc/examples') ]
+
+  RDoc::Task.new do |rd|
+    # Page to display in index.html
+    rd.main = 'README.rdoc'
+
+    # Output directory
+    rd.rdoc_dir = 'doc/html'
+
+    # Doc and embedded-doc files for rdoc to process
+    rd.rdoc_files << 'README.rdoc' 
+    rd.rdoc_files += RDOC_EXTRA_FILES
+    rd.rdoc_files += MOD_FILES
+    rd.rdoc_files += PLUGIN_FILES
+    rd.rdoc_files += EXAMPLE_FILES
+  end
+end
+
+# ---------------------------------------------------------------------- 
+namespace :test do
+
+  MOD_UNIT_TESTS = FileList[ 'tests/ut_*.rb' ]
+  # unit tests for individual PlanR Plugins
+  MOD_PLUGIN_UNIT_TESTS = FileList[ 'tests/plugins/ut_*.rb' ]
+  # Integration tests
+  INTEGRATION_TESTS = FileList[ 'tests/integration/*.rb' ]
+  # System (end-to-end) tests
+  SYSTEM_TESTS = FileList[ 'tests/system/*.rb' ]
+  # Standard unit tests: recommended for general testing
+  STD_UNIT_TESTS = MOD_UNIT_TESTS + MOD_PLUGIN_UNIT_TESTS
+  # All project tests
+  ALL_TESTS = STD_UNIT_TESTS + INTEGRATION_TESTS + SYSTEM_TESTS
+
+  desc 'Run Plan-R module unit tests'
+  Rake::TestTask.new('module') do |t|
+    t.libs << Dir.pwd
+    t.test_files = MOD_UNIT_TESTS
+    t.verbose = true
+    t.warning = true
+  end
+
+  desc 'Run Plan-R plugin unit tests'
+  Rake::TestTask.new('plugins') do |t|
+    t.libs << Dir.pwd
+    t.test_files = MOD_PLUGIN_UNIT_TESTS
+    t.verbose = true
+    t.warning = true
+  end
+
+  # Note: this aggregates the preceding tests into a single output metric. 
+  #       Recommended for standard in-dev unit testing. This is the default
+  #       test target.
+  desc 'Run all Plan-R unit tests'
+  Rake::TestTask.new('unit') do |t|
+    t.libs << Dir.pwd
+    t.test_files = STD_UNIT_TESTS
+    t.verbose = true
+    t.warning = true
+  end
+
+  desc 'Run Plan-R integration (component) tests'
+  Rake::TestTask.new('integration') do |t|
+    t.libs << Dir.pwd
+    t.test_files = INTEGRATION_TESTS
+    t.verbose = true
+    t.warning = true
+  end
+
+  desc 'Run Plan-R system (end-to-end) tests'
+  Rake::TestTask.new('system') do |t|
+    t.libs << Dir.pwd
+    t.test_files = SYSTEM_TESTS
+    t.verbose = true
+    t.warning = true
+  end
+
+  # Complete suite of unit tests. Recommended for release testing.
+  # “TEST=filename”
+  # “TESTOPTS=options”
+  desc 'Run all unit, integration, and system tests'
+  Rake::TestTask.new('all') do |t|
+    t.libs << Dir.pwd
+    t.test_files = ALL_TESTS
+    t.verbose = true
+    t.warning = false
+  end
+
+  # Use this test during API development. It runs tests/api-dev.rb
+  desc 'Run API development sanity checks'
+  Rake::TestTask.new('api-dev') do |t|
+    t.libs << Dir.pwd
+    t.test_files = FileList[ 'tests/api-dev.rb' ]
+    t.verbose = true
+    t.warning = true
+  end
+end
+
+# ---------------------------------------------------------------------- 
+namespace :repo do
+  task :binalysis do |t|
+  end
+  # FIXME: build demo repos
+  # tests/repo_generation_tests/
+  # gen_binalysis.sh  gen_fixit.sh  tree_test.rb
+end
+
+# ---------------------------------------------------------------------- 
+# Default build target(s)
+task :default => ['test:all']
